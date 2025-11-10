@@ -6,11 +6,12 @@ int servo_pin_right_wheel = 10;
 int servo_pin_left_wheel = 11;
 float prev_time = 0;
 bool crash = false;
-int reverse_until;
+int reverse_until = 0;
+int reverse_direction;
+int angle = 0;
 
 void setup()
 {
-    delay(1000);
     motor1.attach(servo_pin_right_wheel);
     motor2.attach(servo_pin_left_wheel);
     Serial.begin(9600);
@@ -23,6 +24,10 @@ double a_max_emergency = 1.0;
 
 void loop()
 {
+
+    int input_l = digitalRead(5);
+    int input_r = digitalRead(7);
+
     float seconds_passed = micros() / 1000000.0;
     float delta_time = seconds_passed - prev_time;
 
@@ -34,16 +39,37 @@ void loop()
 
     int drive_collision = check_collision();
 
-    Serial.println(drive_collision);
+    // Serial.println(drive_collision);
 
     if (crash == false)
     {
+
         drive(0.15, 0.15, delta_time, a_max);
         if (drive_collision == 0 or drive_collision == 2)
         {
+            reverse_direction = check_collision();
             drive(0, 0, delta_time, a_max_emergency);
             crash = true;
-            reverse_until = prev_time + 3.0;
+            if (reverse_direction == 2 and abs(angle) != 90)
+            {
+                reverse_until = prev_time + 3.5;
+                angle -= 45;
+            }
+            else if (reverse_direction == 0 and abs(angle) != 90)
+            {
+                reverse_until = prev_time + 3.5;
+                angle += 45;
+            }
+            else if (angle == -90)
+            {
+                reverse_until = prev_time + 7.0;
+                angle += 90;
+            }
+            else if (angle == 90)
+            {
+                reverse_until = prev_time + 7.0;
+                angle -= 90;
+            }
         }
         else if (drive_collision == 1)
         {
@@ -52,22 +78,42 @@ void loop()
     }
     else if (crash == true)
     {
-        if (drive_collision == 2)
+        // Bestämmer reverse_direction momentant
+
+        // Serial.println("reverse direction.    " + String(reverse_direction));
+
+        Serial.println("   ---   " + String(angle) + "   ---   ");
+        if (reverse_direction == 2)
         { // krock höger, snurrar vänster hjul snabbare
-            reverse(0.04, 0.08, delta_time, a_max);
+            if (angle == -90)
+            {
+                reverse(0.1, 0.01, delta_time, a_max);
+            }
+            else
+            {
+                reverse(0.01, 0.1, delta_time, a_max);
+            }
         }
         else
         { // vänster eller båda
-            reverse(0.08, 0.04, delta_time, a_max);
+            if (angle == 90)
+            {
+                reverse(0.1, 0.01, delta_time, a_max);
+            }
+            else
+            {
+                reverse(0.01, 0.1, delta_time, a_max);
+            }
         }
         if (seconds_passed > reverse_until)
         {
+
             drive(0, 0, delta_time, a_max_emergency);
+
+            Serial.println(reverse_direction);
+            reverse_direction = 1;
             crash = false;
         }
-
-        // else (){
-        // }
     }
 }
 
@@ -116,11 +162,7 @@ int check_collision()
     int input_l = digitalRead(5);
     int input_r = digitalRead(7);
 
-    int sensor_values[] = {input_l, input_r};
-    int temp[] = {9, 5};
-
-    Serial.println(input_r);
-    Serial.println(input_r);
+    // Serial.println(String(input_l) + "   -   " + String(input_r));
 
     if (input_l == 1 and input_r == 1)
     {
