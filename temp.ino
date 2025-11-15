@@ -2,13 +2,47 @@
 
 Servo motor1; // right
 Servo motor2; // left
+
 int servo_pin_right_wheel = 10;
 int servo_pin_left_wheel = 11;
+
 float prev_time = 0;
-bool crash = false;
+
 int reverse_until = 0;
-int reverse_direction;
+int reverse_aim;
+
+bool hit_l = false;
+bool hit_r = false;
+
 int angle = 0;
+float task_timer;
+
+double a_max = 0.2;
+double a_max_emergency = 1.0;
+
+unsigned long taskStartTime = 0;
+unsigned long taskDuration = 0;
+bool taskActive = false;
+
+enum AimPhase
+{
+    AIM_REVERSE,
+    AIM_TURN,
+    AIM_STRAIGHTEN
+};
+
+AimPhase aimPhase = AIM_REVERSE;
+
+enum Mode
+{
+    DRIVE,
+    STOP,
+    REVERSE,
+    AIM_LEFT,
+    AIM_RIGHT
+};
+
+Mode mode = DRIVE;
 
 void setup()
 {
@@ -19,102 +53,157 @@ void setup()
     pinMode(5, INPUT);
 }
 
-double a_max = 0.2;
-double a_max_emergency = 1.0;
-
 void loop()
 {
+    // digitalRead = 1 om ingen hit och digitalRead = 0 om hit
+    // Skriver variabeln så att hit_l,r = 1 om hit
+    // Skriver variabeln så att hit_l,r = 0 om safe
+    // 1 borde evaluera som truthy
+    // 0 borde evaluera som falsy
 
-    int input_l = digitalRead(5);
-    int input_r = digitalRead(7);
+    hit_l = 1 - digitalRead(5);
+    hit_r = 1 - digitalRead(7);
 
     float seconds_passed = micros() / 1000000.0;
     float delta_time = seconds_passed - prev_time;
-
     prev_time = seconds_passed;
     if (delta_time <= 0)
     {
         return;
     }
 
-    int drive_collision = check_collision();
-
-    // Serial.println(drive_collision);
-
-    if (crash == false)
+    if (!taskActive)
     {
-
-        drive(0.15, 0.15, delta_time, a_max);
-        if (drive_collision == 0 or drive_collision == 2)
+        if (hit_l && hit_r && mode != REVERSE)
         {
-            reverse_direction = check_collision();
-            drive(0, 0, delta_time, a_max_emergency);
-            crash = true;
-            if (reverse_direction == 2 and abs(angle) != 90)
-            {
-                reverse_until = prev_time + 3.5;
-                angle -= 45;
-            }
-            else if (reverse_direction == 0 and abs(angle) != 90)
-            {
-                reverse_until = prev_time + 3.5;
-                angle += 45;
-            }
-            else if (angle == -90)
-            {
-                reverse_until = prev_time + 7.0;
-                angle += 90;
-            }
-            else if (angle == 90)
-            {
-                reverse_until = prev_time + 7.0;
-                angle -= 90;
-            }
+            drive(0.0, 0.0, delta_time, a_max_emergency);
+            mode = REVERSE;
+            start_task_timer(3.0);
         }
-        else if (drive_collision == 1)
+        else if (hit_l && mode != AIM_RIGHT)
         {
-            crash = false;
+            drive(0.0, 0.0, delta_time, a_max_emergency);
+            mode = AIM_RIGHT;
+            start_task_timer(2.0);
         }
-    }
-    else if (crash == true)
-    {
-        // Bestämmer reverse_direction momentant
-
-        // Serial.println("reverse direction.    " + String(reverse_direction));
-
-        Serial.println("   ---   " + String(angle) + "   ---   ");
-        if (reverse_direction == 2)
-        { // krock höger, snurrar vänster hjul snabbare
-            if (angle == -90)
-            {
-                reverse(0.1, 0.01, delta_time, a_max);
-            }
-            else
-            {
-                reverse(0.01, 0.1, delta_time, a_max);
-            }
+        else if (hit_r && mode != AIM_LEFT)
+        {
+            drive(0.0, 0.0, delta_time, a_max_emergency);
+            mode = AIM_LEFT;
+            start_task_timer(2.0);
         }
         else
-        { // vänster eller båda
-            if (angle == 90)
-            {
-                reverse(0.1, 0.01, delta_time, a_max);
-            }
-            else
-            {
-                reverse(0.01, 0.1, delta_time, a_max);
-            }
-        }
-        if (seconds_passed > reverse_until)
         {
-
-            drive(0, 0, delta_time, a_max_emergency);
-
-            Serial.println(reverse_direction);
-            reverse_direction = 1;
-            crash = false;
+            mode = DRIVE;
         }
     }
+
+    switch (mode)
+    {
+    case DRIVE:
+        drive(0.15, 0.15, delta_time, a_max);
+        break;
+
+    case REVERSE:
+        drive(-0.15, -0.15, delta_time, a_max);
+        break;
+
+    case AIM_LEFT:
+        // svänger först vänster och rätar sedan ut
+        // slutposition till vänster om vart man började
+
+        switch (aimPhase)
+        {
+        case AIM_REVERSE:
+            drive(-0.15, -0.15, delta_time, a_max);
+            if (taskTimerDone())
+            {
+                aimPhase = AIM_TURN;
+                start_task_timer(2.5);
+                Serial.println("hej");
+            }
+            break;
+
+        case AIM_TURN:
+            drive(0.1, 0.01, delta_time, a_max);
+            if (taskTimerDone())
+            {
+                aimPhase = AIM_STRAIGHTEN;
+                start_task_timer(1.3);
+            }
+            break;
+
+        case AIM_STRAIGHTEN:
+            drive(0.01, 0.1, delta_time, a_max);
+            if (taskTimerDone())
+            {
+                aimPhase = AIM_REVERSE;
+                mode = DRIVE;
+            }
+            break;
+        }
+        Serial.println("siktar vänster, step: " + String(aimPhase));
+        break;
+
+    case AIM_RIGHT:
+        // svänger först höger och rätar sedan ut
+        // slutposition till vänster om vart man började
+
+        switch (aimPhase)
+        {
+        case AIM_REVERSE:
+            drive(-0.15, -0.15, delta_time, a_max);
+            if (taskTimerDone())
+            {
+                aimPhase = AIM_TURN;
+                start_task_timer(2.3);
+                Serial.println("hej");
+            }
+            break;
+
+        case AIM_TURN:
+            drive(0.01, 0.1, delta_time, a_max);
+            if (taskTimerDone())
+            {
+                aimPhase = AIM_STRAIGHTEN;
+                start_task_timer(1.5);
+            }
+            break;
+
+        case AIM_STRAIGHTEN:
+            drive(0.1, 0.01, delta_time, a_max);
+            if (taskTimerDone())
+            {
+                aimPhase = AIM_REVERSE;
+                mode = DRIVE;
+            }
+            break;
+        }
+        Serial.println("siktar höger, step: " + String(aimPhase));
+        break;
+
+    default:
+        drive(0.0, 0.0, delta_time, a_max_emergency); // STOP
+    }
+}
+
+void start_task_timer(float seconds)
+{
+    taskStartTime = micros();
+    taskDuration = seconds * 1000000.0;
+    taskActive = true;
+}
+
+bool taskTimerDone()
+{
+    if (!taskActive)
+        return false;
+    if (micros() - taskStartTime >= taskDuration)
+    {
+        taskActive = false;
+        return true;
+    }
+    return false;
 }
 
 int right_speed_to_arduino_units(double meter_per_second)
@@ -155,29 +244,4 @@ void drive(double left_speed_target, double right_speed_target, double delta_tim
 void reverse(double left_speed_target, double right_speed_target, float delta_time, float acceleration)
 {
     drive(-left_speed_target, -right_speed_target, delta_time, acceleration);
-}
-
-int check_collision()
-{
-    int input_l = digitalRead(5);
-    int input_r = digitalRead(7);
-
-    // Serial.println(String(input_l) + "   -   " + String(input_r));
-
-    if (input_l == 1 and input_r == 1)
-    {
-        return 1; // allt är lugnt
-    }
-    else if (input_l == 0 and input_r == 0)
-    {
-        return 0; // krock båda
-    }
-    else if (input_l == 0)
-    {
-        return 0; // krock vänster
-    }
-    else if (input_r == 0)
-    {
-        return 2; // krock höger
-    }
 }
