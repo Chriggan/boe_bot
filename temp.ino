@@ -8,21 +8,15 @@ int servo_pin_left_wheel = 11;
 
 float prev_time = 0;
 
-int reverse_until = 0;
-int reverse_aim;
-
 bool hit_l = false;
 bool hit_r = false;
-
-int angle = 0;
-float task_timer;
 
 double a_max = 0.2;
 double a_max_emergency = 1.0;
 
-unsigned long taskStartTime = 0;
-unsigned long taskDuration = 0;
-bool taskActive = false;
+unsigned long task_start_time = 0;
+unsigned long task_duration = 0;
+bool task_active = false;
 
 enum AimPhase
 {
@@ -72,7 +66,7 @@ void loop()
         return;
     }
 
-    if (!taskActive)
+    if (!task_active)
     {
         if (hit_l && hit_r && mode != REVERSE)
         {
@@ -116,7 +110,7 @@ void loop()
         {
         case AIM_REVERSE:
             drive(-0.15, -0.15, delta_time, a_max);
-            if (taskTimerDone())
+            if (task_timer_done())
             {
                 aimPhase = AIM_TURN;
                 start_task_timer(2.5);
@@ -126,7 +120,7 @@ void loop()
 
         case AIM_TURN:
             drive(0.1, 0.01, delta_time, a_max);
-            if (taskTimerDone())
+            if (task_timer_done())
             {
                 aimPhase = AIM_STRAIGHTEN;
                 start_task_timer(1.3);
@@ -135,7 +129,7 @@ void loop()
 
         case AIM_STRAIGHTEN:
             drive(0.01, 0.1, delta_time, a_max);
-            if (taskTimerDone())
+            if (task_timer_done())
             {
                 aimPhase = AIM_REVERSE;
                 mode = DRIVE;
@@ -153,7 +147,7 @@ void loop()
         {
         case AIM_REVERSE:
             drive(-0.15, -0.15, delta_time, a_max);
-            if (taskTimerDone())
+            if (task_timer_done())
             {
                 aimPhase = AIM_TURN;
                 start_task_timer(2.3);
@@ -163,7 +157,7 @@ void loop()
 
         case AIM_TURN:
             drive(0.01, 0.1, delta_time, a_max);
-            if (taskTimerDone())
+            if (task_timer_done())
             {
                 aimPhase = AIM_STRAIGHTEN;
                 start_task_timer(1.5);
@@ -172,7 +166,7 @@ void loop()
 
         case AIM_STRAIGHTEN:
             drive(0.1, 0.01, delta_time, a_max);
-            if (taskTimerDone())
+            if (task_timer_done())
             {
                 aimPhase = AIM_REVERSE;
                 mode = DRIVE;
@@ -183,24 +177,25 @@ void loop()
         break;
 
     default:
-        drive(0.0, 0.0, delta_time, a_max_emergency); // STOP
+        // STOP
+        drive(0.0, 0.0, delta_time, a_max_emergency);
     }
 }
 
 void start_task_timer(float seconds)
 {
-    taskStartTime = micros();
-    taskDuration = seconds * 1000000.0;
-    taskActive = true;
+    task_start_time = micros();
+    task_duration = seconds * 1000000.0;
+    task_active = true;
 }
 
-bool taskTimerDone()
+bool task_timer_done()
 {
-    if (!taskActive)
+    if (!task_active)
         return false;
-    if (micros() - taskStartTime >= taskDuration)
+    if (micros() - task_start_time >= task_duration)
     {
-        taskActive = false;
+        task_active = false;
         return true;
     }
     return false;
