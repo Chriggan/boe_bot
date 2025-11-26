@@ -1,3 +1,4 @@
+#include <math.h>
 #include <Servo.h>
 
 Servo motor1; // right
@@ -17,6 +18,14 @@ double a_max_emergency = 1.0;
 unsigned long task_start_time = 0;
 unsigned long task_duration = 0;
 bool task_active = false;
+
+float x_const = 0.3;
+float d_value = 0;
+float d_minus = 0;
+
+float k = -4.0;
+
+double s_wished = 0.10;
 
 enum AimPhase
 {
@@ -38,6 +47,31 @@ enum Mode
 
 Mode mode = DRIVE;
 
+unsigned long pingTime()
+{
+    pinMode(13, OUTPUT);
+    digitalWrite(13, LOW);
+    delayMicroseconds(2);
+    digitalWrite(13, HIGH);
+    delayMicroseconds(5);
+    digitalWrite(13, LOW);
+    pinMode(13, INPUT);
+    unsigned long duration = pulseIn(13, HIGH);
+    return duration;
+}
+
+float distance_to_wall()
+{
+    unsigned long ping_time = pingTime();
+    float s = 343 / 2 * ping_time * pow(10, -6);
+    return s;
+}
+
+float filter(float value, float new_value, float x)
+{
+    return (1.0 - x) * value + x * new_value;
+}
+
 void setup()
 {
     motor1.attach(servo_pin_right_wheel);
@@ -47,6 +81,12 @@ void setup()
     pinMode(5, INPUT);
 }
 
+float calculate_velocity(float error_distance)
+{
+    float v_wished = k * error_distance;
+    return v_wished;
+}
+
 void loop()
 {
     // digitalRead = 1 om ingen hit och digitalRead = 0 om hit
@@ -54,6 +94,18 @@ void loop()
     // Skriver variabeln så att hit_l,r = 0 om safe
     // 1 borde evaluera som truthy
     // 0 borde evaluera som falsy
+
+    float distance = distance_to_wall();
+    float d_plus = filter(d_minus, distance, 0.3);
+
+    float error_distance = s_wished - d_plus;
+
+    float v_wished = constrain(calculate_velocity(error_distance), -0.15, 0.15);
+    // float v_wished = calculate_velocity(error_distance);
+
+    // Serial.println("distance  " + String(distance));
+    Serial.println("error     " + String(error_distance));
+    // Serial.println("minus     " + String(d_minus));
 
     hit_l = 1 - digitalRead(5);
     hit_r = 1 - digitalRead(7);
@@ -95,7 +147,7 @@ void loop()
     switch (mode)
     {
     case DRIVE:
-        drive(0.15, 0.15, delta_time, a_max);
+        drive(v_wished, v_wished, delta_time, a_max);
         break;
 
     case REVERSE:
@@ -180,6 +232,7 @@ void loop()
         // STOP
         drive(0.0, 0.0, delta_time, a_max_emergency);
     }
+    d_minus = d_plus;
 }
 
 void start_task_timer(float seconds)
